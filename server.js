@@ -24,8 +24,8 @@ const app = express();
 const PORT = process.env.PORT || 5050;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/promptverse_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_promptverse_2026_xyz99';
-const ADMIN_USER = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'admin@promptverse123';
+const ADMIN_USER = process.env.ADMIN_USERNAME || 'chamikasanjan03@gmail.com';
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'Chamika123@';
 
 // -------------------------------------------------------------
 // 1. MONGODB CONNECTION
@@ -251,17 +251,34 @@ app.get('/api/prompts/:id', async (req, res) => {
 
 /**
  * POST /api/prompts/:id/like
+ * Supports like and unlike atomically with direction: 1 or -1
  */
 app.post('/api/prompts/:id/like', actionLimiter, async (req, res) => {
   try {
     const { id } = req.params;
+    const { action } = req.body || {};
+    const change = action === 'unlike' ? -1 : 1;
+
+    // Use $inc and ensure likes does not drop below 0
     const updated = await Prompt.findOneAndUpdate(
       { id },
-      { $inc: { likes: 1 } },
-      { new: true, select: 'likes' }
+      [
+        {
+          $set: {
+            likes: { $max: [0, { $add: ['$likes', change] }] }
+          }
+        }
+      ],
+      { new: true }
     );
-    res.json({ success: true, likes: updated?.likes || 0 });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Prompt not found' });
+    }
+
+    res.json({ success: true, likes: updated.likes });
   } catch (err) {
+    console.error('Error updating like:', err);
     res.status(500).json({ error: 'Failed to update like' });
   }
 });
@@ -408,6 +425,70 @@ app.post('/api/admin/prompts', verifyAdminToken, async (req, res) => {
   } catch (err) {
     console.error('Create error:', err);
     res.status(500).json({ error: 'MongoDB insert failed' });
+  }
+});
+
+/**
+ * POST /api/admin/prompts/bulk
+ * Import an array of prompts from JSON directly into MongoDB
+ */
+app.post('/api/admin/prompts/bulk', verifyAdminToken, async (req, res) => {
+  try {
+    const { prompts } = req.body;
+    if (!Array.isArray(prompts) || prompts.length === 0) {
+      return res.status(400).json({ error: 'Expected an array of prompts in req.body.prompts' });
+    }
+
+    let inserted = 0;
+    let updated = 0;
+
+    for (const item of prompts) {
+      if (!item.title || !item.prompt || !item.imageUrl) continue;
+
+      const id = item.id || ('pv-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5));
+      const tagsArray = Array.isArray(item.tags)
+        ? item.tags
+        : typeof item.tags === 'string'
+        ? item.tags.split(',').map(t => t.trim()).filter(Boolean)
+        : [];
+
+      const result = await Prompt.findOneAndUpdate(
+        { id },
+        {
+          $set: {
+            id,
+            title: item.title,
+            category: item.category || 'Photorealistic',
+            model: item.model || 'Midjourney v6',
+            aspectRatio: item.aspectRatio || '3:4',
+            prompt: item.prompt,
+            negativePrompt: item.negativePrompt || '',
+            imageUrl: item.imageUrl,
+            tags: tagsArray,
+            likes: Number(item.likes) || 0,
+            copiedCount: Number(item.copiedCount) || 0,
+            featured: Boolean(item.featured),
+            status: 'active'
+          }
+        },
+        { upsert: true, new: true, rawResult: true }
+      );
+
+      if (result.lastErrorObject?.updatedExisting) {
+        updated++;
+      } else {
+        inserted++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Bulk import completed! ${inserted} added, ${updated} updated.`,
+      count: inserted + updated
+    });
+  } catch (err) {
+    console.error('Bulk insert error:', err);
+    res.status(500).json({ error: 'Failed to process bulk import: ' + err.message });
   }
 });
 
