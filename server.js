@@ -1,16 +1,3 @@
-/**
- * ==============================================================================
- * PROMPTVERSE BACKEND REST API (Standalone All-in-One server.js)
- * Domain: api4.clipgo.xyz
- * Features:
- *   - MongoDB Connection via Mongoose (No test data, completely clean)
- *   - Auto-creates 'promptverse_db' isolated from your other VPS databases
- *   - High Security: Helmet, Rate Limiter (Anti-DDoS), CORS, JWT Auth
- *   - Admin APIs: Add, Edit, Delete Prompts, Live Stats, Secure Login
- *   - Public APIs: Get Prompts, Filter by Category/Model, Like & Copy Counters
- * ==============================================================================
- */
-
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -22,10 +9,10 @@ const bcrypt = require('bcryptjs');
 
 const app = express();
 const PORT = process.env.PORT || 5050;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/promptverse_db';
-const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_promptverse_2026_xyz99';
-const ADMIN_USER = process.env.ADMIN_USERNAME || 'chamikasanjan03@gmail.com';
-const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'Chamika123@';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/story_db';
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_storyverse_2026';
+const ADMIN_USER = process.env.ADMIN_USERNAME || 'admin@storyverse.com';
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'AdminStory123@';
 
 // -------------------------------------------------------------
 // 1. MONGODB CONNECTION
@@ -36,8 +23,8 @@ mongoose.connect(MONGODB_URI, {
   socketTimeoutMS: 45000
 })
   .then(() => {
-    console.log('✅ Connected successfully to VPS MongoDB: promptverse_db');
-    console.log('🍃 Isolated Database: No old/test data. Ready for Dashboard entries.');
+    console.log('✅ Connected to MongoDB');
+    seedDefaultStories();
   })
   .catch((err) => {
     console.error('❌ MongoDB Connection Error:', err.message);
@@ -46,21 +33,33 @@ mongoose.connect(MONGODB_URI, {
 // -------------------------------------------------------------
 // 2. MONGOOSE SCHEMA & MODEL
 // -------------------------------------------------------------
-const PromptSchema = new mongoose.Schema(
+const ChapterSchema = new mongoose.Schema({
+  chapterNumber: { type: Number, required: true },
+  title: { type: String, required: true },
+  readTime: { type: String, default: '5 min' },
+  content: { type: String, required: true }
+});
+
+const StorySchema = new mongoose.Schema(
   {
     id: { type: String, required: true, unique: true, index: true },
     title: { type: String, required: true, trim: true },
+    author: { type: String, required: true, default: 'Unknown Author' },
     category: { type: String, required: true, index: true },
-    model: { type: String, required: true, index: true },
-    aspectRatio: { type: String, default: '3:4' },
-    prompt: { type: String, required: true },
-    negativePrompt: { type: String, default: '' },
-    imageUrl: { type: String, required: true },
-    tags: { type: [String], default: [], index: true },
+    coverImage: { type: String, required: true },
+    summary: { type: String, required: true },
+    previewExcerpt: { type: String, default: '' },
+    totalPages: { type: Number, default: 120 },
+    currentReadingPage: { type: Number, default: 1 },
+    series: { type: String, default: '' },
+    volume: { type: String, default: '' },
+    tags: { type: [String], default: [] },
+    views: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
-    copiedCount: { type: Number, default: 0 },
     featured: { type: Boolean, default: false, index: true },
-    status: { type: String, enum: ['active', 'hidden'], default: 'active', index: true }
+    popular: { type: Boolean, default: false, index: true },
+    status: { type: String, enum: ['published', 'draft'], default: 'published', index: true },
+    chapters: [ChapterSchema]
   },
   {
     timestamps: true,
@@ -74,471 +73,355 @@ const PromptSchema = new mongoose.Schema(
   }
 );
 
-PromptSchema.index({ title: 'text', prompt: 'text', tags: 'text' });
-const Prompt = mongoose.model('Prompt', PromptSchema);
+StorySchema.index({ title: 'text', author: 'text', summary: 'text', tags: 'text' });
+const Story = mongoose.model('Story', StorySchema);
 
 // -------------------------------------------------------------
-// 3. SECURITY MIDDLEWARE
+// 3. SECURITY & MIDDLEWARE
 // -------------------------------------------------------------
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
-
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : ['*'];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(null, true);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key']
-}));
-
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Anti-DDoS Rate Limiter
-const globalLimiter = rateLimit({
+const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 1500,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Rate limit exceeded. Please wait.' }
+  max: 300,
+  message: { error: 'Too many requests, please try again later.' }
 });
-app.use(globalLimiter);
+app.use('/api/', limiter);
 
-// Rate limiter for like/copy clicks
-const actionLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 60,
-  message: { error: 'Too many actions. Slow down.' }
-});
-
-// Admin JWT Authentication Verification
-function verifyAdminToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Access denied. Please login first.' });
+// Authentication Middleware
+const authenticateAdmin = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
   }
 
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.admin = decoded;
     next();
   } catch (err) {
-    return res.status(403).json({ error: 'Invalid or expired token. Please log in again.' });
+    return res.status(403).json({ error: 'Forbidden: Invalid or expired token' });
+  }
+};
+
+// -------------------------------------------------------------
+// 4. SEED INITIAL STORIES (Clean original literature themes)
+// -------------------------------------------------------------
+async function seedDefaultStories() {
+  try {
+    const count = await Story.countDocuments();
+    if (count === 0) {
+      console.log('🌱 Seeding initial sample stories...');
+      const sampleStories = [
+        {
+          id: 'story-1',
+          title: 'The Silent Whispers of the Valley',
+          author: 'Alexander Sterling',
+          category: 'Fantasy & Mystery',
+          coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=600&q=80',
+          summary: 'In a forgotten valley surrounded by mist-laden cliffs, an ancient library holds the records of voices long lost to the wind.',
+          previewExcerpt: 'The lantern flickered against the damp stone corridor. Harvey gripped the silver key tightly. For centuries, no one had dared step past the chamber of echoes, yet the silence itself seemed to call his name with an undeniable pull.',
+          totalPages: 280,
+          currentReadingPage: 42,
+          series: 'Chronicles of the Mist',
+          volume: 'Vol 1',
+          tags: ['Mystery', 'Adventure', 'Fantasy'],
+          views: 1240,
+          likes: 342,
+          featured: true,
+          popular: true,
+          status: 'published',
+          chapters: [
+            {
+              chapterNumber: 1,
+              title: 'The Gates of Mist',
+              readTime: '6 min',
+              content: 'The valley had been quiet for three hundred years. When the clock struck midnight atop the silver spire, the heavy iron bells remained still, yet the air vibrated with an ethereal murmur.\n\nHarvey reached out his hand, brushing the cold moss that clung to the archway. Behind him, the path had completely vanished into the pale fog. Ahead lay the great library whose books were whispered to write themselves whenever a traveler stepped within.'
+            },
+            {
+              chapterNumber: 2,
+              title: 'The Chamber of Echoes',
+              readTime: '8 min',
+              content: 'Every footstep resounded like a bronze bell. High above, vaulted ceilings arched into shadows where golden inscriptions glistened under the dim light of his torch.'
+            }
+          ]
+        },
+        {
+          id: 'story-2',
+          title: 'Echoes of the Midnight Clock',
+          author: 'Eleanor Vance',
+          category: 'Adventure',
+          coverImage: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=600&q=80',
+          summary: 'A thrilling voyage across uncharted seas where time flows backwards whenever the moon turns crimson.',
+          previewExcerpt: 'Every hour after midnight, the stars shifted in reverse. Captain Vance adjusted the brass sextant and watched the ocean currents ripple against the impossible tide.',
+          totalPages: 310,
+          currentReadingPage: 154,
+          series: 'Voyages Beyond the Map',
+          volume: 'Vol 2',
+          tags: ['Maritime', 'Adventure', 'Mystery'],
+          views: 950,
+          likes: 280,
+          featured: false,
+          popular: true,
+          status: 'published',
+          chapters: [
+            {
+              chapterNumber: 1,
+              title: 'The Crimson Horizon',
+              readTime: '7 min',
+              content: 'The sea was glassy, reflecting an indigo sky that refused to lighten into dawn. The compass needle spun gently, pointing neither north nor south, but directly into the heart of the uncharted rift.'
+            }
+          ]
+        },
+        {
+          id: 'story-3',
+          title: 'The Clockwork Alchemist',
+          author: 'Julian Thorne',
+          category: 'Sci-Fi / Steampunk',
+          coverImage: 'https://images.unsplash.com/photo-1532012164546-f432f2e3777a?auto=format&fit=crop&w=600&q=80',
+          summary: 'In an empire powered by steam and clockwork gears, one artisan discovers a mechanism capable of turning stone into pure energy.',
+          previewExcerpt: 'Gears interlocking in perfect harmony, the bronze automaton lifted its hand and inscribed the first equation of renewal onto the brass plate.',
+          totalPages: 245,
+          currentReadingPage: 12,
+          series: 'Gear & Stone',
+          volume: 'Vol 1',
+          tags: ['Steampunk', 'Science', 'Craft'],
+          views: 820,
+          likes: 195,
+          featured: false,
+          popular: true,
+          status: 'published',
+          chapters: [
+            {
+              chapterNumber: 1,
+              title: 'Ticking Brass',
+              readTime: '5 min',
+              content: 'The workshop smelled of mineral oil, heated copper, and ozone. Master Thorne inspected the miniature escapement wheel through his jeweler lens.'
+            }
+          ]
+        },
+        {
+          id: 'story-4',
+          title: 'The Lost Botanist of Oakhaven',
+          author: 'Clara Bennett',
+          category: 'Historical Fiction',
+          coverImage: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=600&q=80',
+          summary: 'The chronicles of a Victorian botanist documenting luminous flora that blooms only during solar eclipses.',
+          previewExcerpt: 'Her journal was filled with pressed petals of translucent blue. With each specimen came a memory of the mountain path that nearly cost her life.',
+          totalPages: 190,
+          currentReadingPage: 78,
+          series: 'The Green Realm',
+          volume: 'Vol 1',
+          tags: ['Botany', 'Nature', 'Historical'],
+          views: 740,
+          likes: 210,
+          featured: false,
+          popular: true,
+          status: 'published',
+          chapters: [
+            {
+              chapterNumber: 1,
+              title: 'The Luminous Root',
+              readTime: '6 min',
+              content: 'It was on the third day of the expedition when Clara spotted the pale glow beneath the roots of the ancient yew tree.'
+            }
+          ]
+        }
+      ];
+      await Story.insertMany(sampleStories);
+      console.log('✅ Successfully seeded sample stories.');
+    }
+  } catch (err) {
+    console.error('Error seeding stories:', err);
   }
 }
 
 // -------------------------------------------------------------
-// 4. HEALTH CHECK
+// 5. PUBLIC APIS
 // -------------------------------------------------------------
-app.get('/', (req, res) => {
-  res.json({
-    status: 'online',
-    service: 'PromptVerse Clean API',
-    domain: 'api4.clipgo.xyz',
-    time: new Date().toISOString()
-  });
-});
 
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'healthy', database: 'connected', time: new Date() });
+  res.json({ status: 'ok', service: 'Story Platform API', timestamp: new Date() });
 });
 
-// -------------------------------------------------------------
-// 5. PUBLIC APIS (For Next.js Site)
-// -------------------------------------------------------------
-
-/**
- * GET /api/prompts
- * Returns prompts added from dashboard
- */
-app.get('/api/prompts', async (req, res) => {
+// Get all stories with filtering & pagination
+app.get('/api/stories', async (req, res) => {
   try {
-    const { category, model, search, featured, page = 1, limit = 100 } = req.query;
+    const { category, search, popular, featured, page = 1, limit = 20 } = req.query;
+    const filter = { status: 'published' };
 
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10)));
-    const skip = (pageNum - 1) * limitNum;
-
-    const query = { status: 'active' };
-
-    if (category && category !== 'All') {
-      query.category = category;
+    if (category && category !== 'all') {
+      filter.category = new RegExp(category, 'i');
+    }
+    if (popular === 'true') {
+      filter.popular = true;
+    }
+    if (featured === 'true') {
+      filter.featured = true;
+    }
+    if (search) {
+      filter.$text = { $search: search };
     }
 
-    if (model && model !== 'All') {
-      query.model = model;
-    }
-
-    if (featured === 'true' || featured === '1') {
-      query.featured = true;
-    }
-
-    if (search && search.trim() !== '') {
-      const q = search.trim();
-      query.$or = [
-        { title: { $regex: q, $options: 'i' } },
-        { prompt: { $regex: q, $options: 'i' } },
-        { tags: { $in: [new RegExp(q, 'i')] } }
-      ];
-    }
-
-    const total = await Prompt.countDocuments(query);
-    const prompts = await Prompt.find(query)
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const stories = await Story.find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limitNum)
-      .lean();
+      .limit(parseInt(limit));
+
+    const total = await Story.countDocuments(filter);
 
     res.json({
       success: true,
-      data: prompts,
+      data: stories,
       pagination: {
-        page: pageNum,
-        limit: limitNum,
+        page: parseInt(page),
+        limit: parseInt(limit),
         total,
-        totalPages: Math.ceil(total / limitNum)
+        pages: Math.ceil(total / parseInt(limit))
       }
     });
   } catch (err) {
-    console.error('Error fetching prompts:', err);
-    res.status(500).json({ error: 'Failed to retrieve prompts' });
+    res.status(500).json({ error: 'Failed to fetch stories', details: err.message });
   }
 });
 
-/**
- * GET /api/prompts/featured
- */
-app.get('/api/prompts/featured', async (req, res) => {
+// Get single story by ID or slug
+app.get('/api/stories/:id', async (req, res) => {
   try {
-    const featuredPrompts = await Prompt.find({ status: 'active', featured: true })
-      .sort({ likes: -1 })
-      .limit(20)
-      .lean();
-
-    res.json({ success: true, data: featuredPrompts });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to retrieve featured prompts' });
-  }
-});
-
-/**
- * GET /api/prompts/:id
- */
-app.get('/api/prompts/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const prompt = await Prompt.findOne({ id, status: 'active' }).lean();
-
-    if (!prompt) {
-      return res.status(404).json({ error: 'Prompt not found' });
+    const story = await Story.findOne({ id: req.params.id });
+    if (!story) {
+      return res.status(404).json({ error: 'Story not found' });
     }
+    // Increment views
+    story.views += 1;
+    await story.save();
 
-    res.json({ success: true, data: prompt });
+    res.json({ success: true, data: story });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to get prompt' });
+    res.status(500).json({ error: 'Failed to fetch story', details: err.message });
   }
 });
 
-/**
- * POST /api/prompts/:id/like
- * Supports like and unlike atomically with direction: 1 or -1
- */
-app.post('/api/prompts/:id/like', actionLimiter, async (req, res) => {
+// Like a story
+app.post('/api/stories/:id/like', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { action } = req.body || {};
-    const change = action === 'unlike' ? -1 : 1;
-
-    // Use $inc and ensure likes does not drop below 0
-    const updated = await Prompt.findOneAndUpdate(
-      { id },
-      [
-        {
-          $set: {
-            likes: { $max: [0, { $add: ['$likes', change] }] }
-          }
-        }
-      ],
+    const story = await Story.findOneAndUpdate(
+      { id: req.params.id },
+      { $inc: { likes: 1 } },
       { new: true }
     );
-
-    if (!updated) {
-      return res.status(404).json({ error: 'Prompt not found' });
-    }
-
-    res.json({ success: true, likes: updated.likes });
+    if (!story) return res.status(404).json({ error: 'Story not found' });
+    res.json({ success: true, likes: story.likes });
   } catch (err) {
-    console.error('Error updating like:', err);
-    res.status(500).json({ error: 'Failed to update like' });
-  }
-});
-
-/**
- * POST /api/prompts/:id/copy
- */
-app.post('/api/prompts/:id/copy', actionLimiter, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const updated = await Prompt.findOneAndUpdate(
-      { id },
-      { $inc: { copiedCount: 1 } },
-      { new: true, select: 'copiedCount' }
-    );
-    res.json({ success: true, copiedCount: updated?.copiedCount || 0 });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update copy count' });
-  }
-});
-
-/**
- * GET /api/categories
- */
-app.get('/api/categories', async (req, res) => {
-  try {
-    const cats = await Prompt.distinct('category', { status: 'active' });
-    const defaultCats = [
-      'All',
-      'Photorealistic',
-      'Cyberpunk & Sci-Fi',
-      'Fantasy & Mythical',
-      'Anime & Manga',
-      '3D & Isometric',
-      'Minimalist & Vector',
-      'Architecture & Interior',
-      'Cinematic & Film',
-      'Marketing & Product'
-    ];
-    const uniqueCats = Array.from(new Set([...defaultCats, ...cats]));
-    res.json({ success: true, data: uniqueCats });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch categories' });
+    res.status(500).json({ error: 'Failed to like story' });
   }
 });
 
 // -------------------------------------------------------------
-// 6. DASHBOARD & ADMIN APIS
+// 6. ADMIN AUTHENTICATION
 // -------------------------------------------------------------
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
 
-/**
- * POST /api/admin/login
- */
-app.post('/api/admin/login', actionLimiter, async (req, res) => {
+  if (username === ADMIN_USER && password === ADMIN_PASS) {
+    const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    return res.json({
+      success: true,
+      token,
+      admin: { username, role: 'admin' }
+    });
+  }
+
+  return res.status(401).json({ error: 'Invalid admin credentials' });
+});
+
+// -------------------------------------------------------------
+// 7. ADMIN PROTECTED APIS
+// -------------------------------------------------------------
+// Create Story
+app.post('/api/admin/stories', authenticateAdmin, async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username and password required' });
+    const { title, author, category, coverImage, summary, previewExcerpt, totalPages, series, volume, tags, chapters } = req.body;
+    if (!title || !category || !coverImage || !summary) {
+      return res.status(400).json({ error: 'Required fields: title, category, coverImage, summary' });
     }
 
-    // Trim whitespace and case-insensitive compare for email
-    const cleanUser = String(username).trim().toLowerCase();
-    const cleanPass = String(password).trim();
+    const id = 'story-' + Date.now();
+    const newStory = new Story({
+      id,
+      title,
+      author: author || 'Admin Author',
+      category,
+      coverImage,
+      summary,
+      previewExcerpt: previewExcerpt || summary.slice(0, 150) + '...',
+      totalPages: totalPages || 100,
+      series: series || '',
+      volume: volume || '',
+      tags: tags || [],
+      chapters: chapters || []
+    });
 
-    const expectedUser = String(process.env.ADMIN_USERNAME || ADMIN_USER).trim().toLowerCase();
-    const expectedPass = String(process.env.ADMIN_PASSWORD || ADMIN_PASS).trim();
-
-    // Also support fallback 'admin' & 'Chamika123@' just in case
-    const isMatched = (cleanUser === expectedUser && cleanPass === expectedPass) ||
-                      (cleanUser === 'chamikasanjan03@gmail.com' && cleanPass === 'Chamika123@') ||
-                      (cleanUser === 'admin' && cleanPass === 'Chamika123@') ||
-                      (cleanUser === 'admin' && cleanPass === 'admin@promptverse123');
-
-    if (isMatched) {
-      const token = jwt.sign(
-        { username: cleanUser, role: 'admin' },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-      return res.json({
-        success: true,
-        message: 'Login successful',
-        token,
-        admin: { username: cleanUser, role: 'admin' }
-      });
-    }
-
-    return res.status(401).json({ error: 'Invalid username or password' });
+    await newStory.save();
+    res.status(201).json({ success: true, data: newStory });
   } catch (err) {
-    res.status(500).json({ error: 'Authentication failed' });
+    res.status(500).json({ error: 'Failed to create story', details: err.message });
   }
 });
 
-/**
- * GET /api/admin/stats
- */
-app.get('/api/admin/stats', verifyAdminToken, async (req, res) => {
+// Update Story
+app.put('/api/admin/stories/:id', authenticateAdmin, async (req, res) => {
   try {
-    const totalPrompts = await Prompt.countDocuments();
-    const aggregateData = await Prompt.aggregate([
-      { $group: { _id: null, totalLikes: { $sum: '$likes' }, totalCopies: { $sum: '$copiedCount' } } }
-    ]);
+    const updated = await Story.findOneAndUpdate({ id: req.params.id }, req.body, { new: true });
+    if (!updated) return res.status(404).json({ error: 'Story not found' });
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update story' });
+  }
+});
+
+// Delete Story
+app.delete('/api/admin/stories/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const deleted = await Story.findOneAndDelete({ id: req.params.id });
+    if (!deleted) return res.status(404).json({ error: 'Story not found' });
+    res.json({ success: true, message: 'Story deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete story' });
+  }
+});
+
+// Admin Stats
+app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
+  try {
+    const totalStories = await Story.countDocuments();
+    const published = await Story.countDocuments({ status: 'published' });
+    const totalLikes = await Story.aggregate([{ $group: { _id: null, total: { $sum: '$likes' } } }]);
+    const totalViews = await Story.aggregate([{ $group: { _id: null, total: { $sum: '$views' } } }]);
 
     res.json({
       success: true,
       stats: {
-        totalPrompts,
-        totalLikes: aggregateData[0]?.totalLikes || 0,
-        totalCopies: aggregateData[0]?.totalCopies || 0
+        totalStories,
+        published,
+        likes: totalLikes[0]?.total || 0,
+        views: totalViews[0]?.total || 0
       }
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch stats' });
+    res.status(500).json({ error: 'Failed to load stats' });
   }
 });
 
-/**
- * POST /api/admin/prompts
- * Add new prompt directly into MongoDB via Dashboard
- */
-app.post('/api/admin/prompts', verifyAdminToken, async (req, res) => {
-  try {
-    const {
-      title,
-      category,
-      model,
-      aspectRatio = '3:4',
-      prompt,
-      negativePrompt = '',
-      imageUrl,
-      tags = [],
-      featured = false
-    } = req.body;
-
-    if (!title || !prompt || !imageUrl) {
-      return res.status(400).json({ error: 'Title, prompt, and image URL are required.' });
-    }
-
-    const id = 'pv-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-    const newDoc = await Prompt.create({
-      id,
-      title,
-      category: category || 'Photorealistic',
-      model: model || 'Midjourney v6',
-      aspectRatio,
-      prompt,
-      negativePrompt,
-      imageUrl,
-      tags: Array.isArray(tags) ? tags : [],
-      featured: Boolean(featured),
-      likes: 0,
-      copiedCount: 0
-    });
-
-    res.status(201).json({ success: true, message: 'Prompt created successfully', id: newDoc.id });
-  } catch (err) {
-    console.error('Create error:', err);
-    res.status(500).json({ error: 'MongoDB insert failed' });
-  }
-});
-
-/**
- * POST /api/admin/prompts/bulk
- * Import an array of prompts from JSON directly into MongoDB
- */
-app.post('/api/admin/prompts/bulk', verifyAdminToken, async (req, res) => {
-  try {
-    const { prompts } = req.body;
-    if (!Array.isArray(prompts) || prompts.length === 0) {
-      return res.status(400).json({ error: 'Expected an array of prompts in req.body.prompts' });
-    }
-
-    let inserted = 0;
-    let updated = 0;
-
-    for (const item of prompts) {
-      if (!item.title || !item.prompt || !item.imageUrl) continue;
-
-      const id = item.id || ('pv-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5));
-      const tagsArray = Array.isArray(item.tags)
-        ? item.tags
-        : typeof item.tags === 'string'
-        ? item.tags.split(',').map(t => t.trim()).filter(Boolean)
-        : [];
-
-      const result = await Prompt.findOneAndUpdate(
-        { id },
-        {
-          $set: {
-            id,
-            title: item.title,
-            category: item.category || 'Photorealistic',
-            model: item.model || 'Midjourney v6',
-            aspectRatio: item.aspectRatio || '3:4',
-            prompt: item.prompt,
-            negativePrompt: item.negativePrompt || '',
-            imageUrl: item.imageUrl,
-            tags: tagsArray,
-            likes: Number(item.likes) || 0,
-            copiedCount: Number(item.copiedCount) || 0,
-            featured: Boolean(item.featured),
-            status: 'active'
-          }
-        },
-        { upsert: true, new: true, rawResult: true }
-      );
-
-      if (result.lastErrorObject?.updatedExisting) {
-        updated++;
-      } else {
-        inserted++;
-      }
-    }
-
-    res.json({
-      success: true,
-      message: `Bulk import completed! ${inserted} added, ${updated} updated.`,
-      count: inserted + updated
-    });
-  } catch (err) {
-    console.error('Bulk insert error:', err);
-    res.status(500).json({ error: 'Failed to process bulk import: ' + err.message });
-  }
-});
-
-/**
- * PUT /api/admin/prompts/:id
- */
-app.put('/api/admin/prompts/:id', verifyAdminToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    await Prompt.findOneAndUpdate({ id }, { $set: req.body });
-    res.json({ success: true, message: 'Prompt updated successfully' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update prompt' });
-  }
-});
-
-/**
- * DELETE /api/admin/prompts/:id
- */
-app.delete('/api/admin/prompts/:id', verifyAdminToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    await Prompt.findOneAndDelete({ id });
-    res.json({ success: true, message: 'Prompt deleted' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to delete prompt' });
-  }
-});
-
-// -------------------------------------------------------------
-// START SERVER
-// -------------------------------------------------------------
 app.listen(PORT, () => {
-  console.log(`===============================================`);
-  console.log(`🚀 PromptVerse MongoDB API running on port ${PORT}`);
-  console.log(`🌐 Target Domain: http://api4.clipgo.xyz`);
-  console.log(`🔒 Security: Helmet, Rate-Limit, JWT Enabled`);
-  console.log(`✨ Mode: Completely Clean (Add fresh data via Dashboard)`);
-  console.log(`===============================================`);
+  console.log(`🚀 Story Platform API running at http://localhost:${PORT}`);
 });
