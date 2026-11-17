@@ -11,8 +11,8 @@ const app = express();
 const PORT = process.env.PORT || 5050;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/story_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_storyverse_2026';
-const ADMIN_USER = process.env.ADMIN_USERNAME || 'admin@storyverse.com';
-const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'AdminStory123@';
+const ADMIN_USER = process.env.ADMIN_USERNAME || 'chamikasanjan03@gmail.com';
+const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'Chamika123@';
 
 // -------------------------------------------------------------
 // 1. MONGODB CONNECTION
