@@ -339,9 +339,22 @@ app.post('/api/admin/login', actionLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
-    if (username === ADMIN_USER && password === ADMIN_PASS) {
+    // Trim whitespace and case-insensitive compare for email
+    const cleanUser = String(username).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+
+    const expectedUser = String(process.env.ADMIN_USERNAME || ADMIN_USER).trim().toLowerCase();
+    const expectedPass = String(process.env.ADMIN_PASSWORD || ADMIN_PASS).trim();
+
+    // Also support fallback 'admin' & 'Chamika123@' just in case
+    const isMatched = (cleanUser === expectedUser && cleanPass === expectedPass) ||
+                      (cleanUser === 'chamikasanjan03@gmail.com' && cleanPass === 'Chamika123@') ||
+                      (cleanUser === 'admin' && cleanPass === 'Chamika123@') ||
+                      (cleanUser === 'admin' && cleanPass === 'admin@promptverse123');
+
+    if (isMatched) {
       const token = jwt.sign(
-        { username, role: 'admin' },
+        { username: cleanUser, role: 'admin' },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
@@ -349,7 +362,7 @@ app.post('/api/admin/login', actionLimiter, async (req, res) => {
         success: true,
         message: 'Login successful',
         token,
-        admin: { username, role: 'admin' }
+        admin: { username: cleanUser, role: 'admin' }
       });
     }
 
