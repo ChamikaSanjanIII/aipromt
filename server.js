@@ -81,8 +81,8 @@ const Story = mongoose.model('Story', StorySchema);
 // -------------------------------------------------------------
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'] }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -109,135 +109,10 @@ const authenticateAdmin = (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 4. SEED INITIAL STORIES (Clean original literature themes)
+// 4. CLEAN DATABASE - NO HARDCODED SEED STORIES
 // -------------------------------------------------------------
-async function seedDefaultStories() {
-  try {
-    const count = await Story.countDocuments();
-    if (count === 0) {
-      console.log('🌱 Seeding initial sample stories...');
-      const sampleStories = [
-        {
-          id: 'story-1',
-          title: 'The Silent Whispers of the Valley',
-          author: 'Alexander Sterling',
-          category: 'Fantasy & Mystery',
-          coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=600&q=80',
-          summary: 'In a forgotten valley surrounded by mist-laden cliffs, an ancient library holds the records of voices long lost to the wind.',
-          previewExcerpt: 'The lantern flickered against the damp stone corridor. Harvey gripped the silver key tightly. For centuries, no one had dared step past the chamber of echoes, yet the silence itself seemed to call his name with an undeniable pull.',
-          totalPages: 280,
-          currentReadingPage: 42,
-          series: 'Chronicles of the Mist',
-          volume: 'Vol 1',
-          tags: ['Mystery', 'Adventure', 'Fantasy'],
-          views: 1240,
-          likes: 342,
-          featured: true,
-          popular: true,
-          status: 'published',
-          chapters: [
-            {
-              chapterNumber: 1,
-              title: 'The Gates of Mist',
-              readTime: '6 min',
-              content: 'The valley had been quiet for three hundred years. When the clock struck midnight atop the silver spire, the heavy iron bells remained still, yet the air vibrated with an ethereal murmur.\n\nHarvey reached out his hand, brushing the cold moss that clung to the archway. Behind him, the path had completely vanished into the pale fog. Ahead lay the great library whose books were whispered to write themselves whenever a traveler stepped within.'
-            },
-            {
-              chapterNumber: 2,
-              title: 'The Chamber of Echoes',
-              readTime: '8 min',
-              content: 'Every footstep resounded like a bronze bell. High above, vaulted ceilings arched into shadows where golden inscriptions glistened under the dim light of his torch.'
-            }
-          ]
-        },
-        {
-          id: 'story-2',
-          title: 'Echoes of the Midnight Clock',
-          author: 'Eleanor Vance',
-          category: 'Adventure',
-          coverImage: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=600&q=80',
-          summary: 'A thrilling voyage across uncharted seas where time flows backwards whenever the moon turns crimson.',
-          previewExcerpt: 'Every hour after midnight, the stars shifted in reverse. Captain Vance adjusted the brass sextant and watched the ocean currents ripple against the impossible tide.',
-          totalPages: 310,
-          currentReadingPage: 154,
-          series: 'Voyages Beyond the Map',
-          volume: 'Vol 2',
-          tags: ['Maritime', 'Adventure', 'Mystery'],
-          views: 950,
-          likes: 280,
-          featured: false,
-          popular: true,
-          status: 'published',
-          chapters: [
-            {
-              chapterNumber: 1,
-              title: 'The Crimson Horizon',
-              readTime: '7 min',
-              content: 'The sea was glassy, reflecting an indigo sky that refused to lighten into dawn. The compass needle spun gently, pointing neither north nor south, but directly into the heart of the uncharted rift.'
-            }
-          ]
-        },
-        {
-          id: 'story-3',
-          title: 'The Clockwork Alchemist',
-          author: 'Julian Thorne',
-          category: 'Sci-Fi / Steampunk',
-          coverImage: 'https://images.unsplash.com/photo-1532012164546-f432f2e3777a?auto=format&fit=crop&w=600&q=80',
-          summary: 'In an empire powered by steam and clockwork gears, one artisan discovers a mechanism capable of turning stone into pure energy.',
-          previewExcerpt: 'Gears interlocking in perfect harmony, the bronze automaton lifted its hand and inscribed the first equation of renewal onto the brass plate.',
-          totalPages: 245,
-          currentReadingPage: 12,
-          series: 'Gear & Stone',
-          volume: 'Vol 1',
-          tags: ['Steampunk', 'Science', 'Craft'],
-          views: 820,
-          likes: 195,
-          featured: false,
-          popular: true,
-          status: 'published',
-          chapters: [
-            {
-              chapterNumber: 1,
-              title: 'Ticking Brass',
-              readTime: '5 min',
-              content: 'The workshop smelled of mineral oil, heated copper, and ozone. Master Thorne inspected the miniature escapement wheel through his jeweler lens.'
-            }
-          ]
-        },
-        {
-          id: 'story-4',
-          title: 'The Lost Botanist of Oakhaven',
-          author: 'Clara Bennett',
-          category: 'Historical Fiction',
-          coverImage: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=600&q=80',
-          summary: 'The chronicles of a Victorian botanist documenting luminous flora that blooms only during solar eclipses.',
-          previewExcerpt: 'Her journal was filled with pressed petals of translucent blue. With each specimen came a memory of the mountain path that nearly cost her life.',
-          totalPages: 190,
-          currentReadingPage: 78,
-          series: 'The Green Realm',
-          volume: 'Vol 1',
-          tags: ['Botany', 'Nature', 'Historical'],
-          views: 740,
-          likes: 210,
-          featured: false,
-          popular: true,
-          status: 'published',
-          chapters: [
-            {
-              chapterNumber: 1,
-              title: 'The Luminous Root',
-              readTime: '6 min',
-              content: 'It was on the third day of the expedition when Clara spotted the pale glow beneath the roots of the ancient yew tree.'
-            }
-          ]
-        }
-      ];
-      await Story.insertMany(sampleStories);
-      console.log('✅ Successfully seeded sample stories.');
-    }
-  } catch (err) {
-    console.error('Error seeding stories:', err);
-  }
+function seedDefaultStories() {
+  console.log('🍃 Clean Database mode: Ready for Dashboard entries.');
 }
 
 // -------------------------------------------------------------
@@ -375,6 +250,86 @@ app.post('/api/admin/stories', authenticateAdmin, async (req, res) => {
     res.status(201).json({ success: true, data: newStory });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create story', details: err.message });
+  }
+});
+
+// Bulk Create Stories (from JSON import)
+app.post('/api/admin/stories/bulk', authenticateAdmin, async (req, res) => {
+  try {
+    const { stories } = req.body;
+    if (!Array.isArray(stories) || stories.length === 0) {
+      return res.status(400).json({ error: 'stories must be a non-empty array' });
+    }
+
+    const docs = [];
+    for (let i = 0; i < stories.length; i++) {
+      const item = stories[i] || {};
+      const title = String(item.title || '').trim();
+      const rawStory = String(item.story || item.content || '').trim();
+      if (!title || (!rawStory && (!Array.isArray(item.chapters) || item.chapters.length === 0))) {
+        continue;
+      }
+
+      const category =
+        String(
+          item.category ||
+          (Array.isArray(item.categories) && item.categories[0]) ||
+          'General'
+        ).trim();
+
+      const summary = String(item.summary || rawStory.slice(0, 220)).trim() || title;
+      const previewExcerpt = String(item.previewExcerpt || rawStory.slice(0, 150) + (rawStory.length > 150 ? '...' : '')).trim();
+      const coverImage = String(item.coverImage || 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=600&q=80').trim();
+      const wordCount = rawStory ? rawStory.split(/\s+/).length : 200;
+      const readTime = `${Math.max(1, Math.ceil(wordCount / 200))} min`;
+
+      const chapters =
+        Array.isArray(item.chapters) && item.chapters.length > 0
+          ? item.chapters
+          : [
+              {
+                chapterNumber: 1,
+                title: title,
+                readTime,
+                content: rawStory || summary
+              }
+            ];
+
+      const tags = Array.isArray(item.tags)
+        ? item.tags
+        : Array.isArray(item.categories)
+        ? item.categories
+        : [category];
+
+      docs.push({
+        id: `story-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`,
+        title,
+        author: String(item.author || 'Admin Author').trim(),
+        category,
+        coverImage,
+        summary,
+        previewExcerpt,
+        totalPages: Number(item.totalPages) || Math.max(1, Math.ceil(rawStory.length / 1800)),
+        series: String(item.series || '').trim(),
+        volume: String(item.volume || '').trim(),
+        tags,
+        status: item.status === 'draft' ? 'draft' : 'published',
+        chapters
+      });
+    }
+
+    if (docs.length === 0) {
+      return res.status(400).json({ error: 'No valid stories found in payload' });
+    }
+
+    const inserted = await Story.insertMany(docs, { ordered: false });
+    res.status(201).json({
+      success: true,
+      insertedCount: inserted.length,
+      data: inserted
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to bulk import stories', details: err.message });
   }
 });
 
